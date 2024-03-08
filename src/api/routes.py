@@ -1,92 +1,51 @@
 """
 This module takes care of starting the API Server, Loading the DB and Adding the endpoints
 """
-import os
 from flask import Flask, request, jsonify, url_for, Blueprint
 from api.models import db, User
 from api.utils import generate_sitemap, APIException
-import hashlib
-from flask_cors import CORS
-from flask_jwt_extended import create_access_token
-from flask_jwt_extended import get_jwt_identity
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 
 api = Blueprint('api', __name__)
 
+@api.route('/hello', methods=['POST', 'GET'])
+def handle_hello():
 
-# Allow CORS requests to this API
-CORS(api)
+    response_body = {
+        "message": "Hello! I'm a message that came from the backend, check the network tab on the google inspector and you will see the GET request"
+    }
 
-
-@api.route("/Token", methods=["POST"])
-def create_token():
-    email = request.json.get("email", None)
-    password = request.json.get("password", None)
-    if email != "test" or password != "test":
-        return jsonify({"msg": "Bad email or password"}), 401
-
-    access_token = create_access_token(identity=email)
-    return jsonify(access_token=access_token)
-
+    return jsonify(response_body), 200
 
 @api.route('/signup', methods=['POST'])
-def handle_create_user():
-    # this line is getting the json info sent over from the post request
-    body = request.get_json(force = True)
-    email = body['email']
-    # hashing the password for security reasons
-    # hashlib is a built in python functionality
-    password = hashlib.sha256(body['password'].encode("utf-8")).hexdigest()
-    # creating a user and adding it User model
-    new_user = User(email = email, password = password, is_active = True)
-    db.session.add(new_user)
+def handle_signup():
+    email = request.json.get("email", None)
+    password = request.json.get("password", None)
+    user = User.query.filter_by(email = email).first()
+    if user:
+        return jsonify({"msg": "User account already exists"})
+    newUser = User(email = email, password = password)
+    db.session.add(newUser)
     db.session.commit()
-    # creates an access token based on the user
-    access_token = create_access_token(identity = email)
-    return jsonify(email, "user successfully created"), 200
+    return jsonify("Added User"), 200
 
-@api.route("/User", methods=["GET"])
-def get_all_users():
-    user= User.query.all()
-    all_users= list(map(lambda x: x.serialize(), user))
-    return jsonify(all_users), 200
-
-
-@api.route("/User/<int:id>", methods=["GET"])
-def get_user(id):
-    user= User.query.get(id)
+@api.route('/login', methods=['POST'])
+def handle_login():
+    email = request.json.get("email", None)
+    password = request.json.get("password", None)
+    user = User.query.filter_by(email=email, password=password).first()
     if user is None:
-        raise APIException('User not found', status_code= 404)
-    return jsonify(user.serialize()), 200
+        return jsonify({"msg" : "Bad username or password"}), 401
+    access_token = create_access_token(identity=user.id)
+    return jsonify({"token": access_token, "user_id": user.id}), 200
 
-
-@api.route("/User/<int:id>", methods=["PUT"])
-def update_user(id):
-    user= User.query.get(id)
-    body= request.get_json
-    if user is None:
-        raise APIException('User not found', status_code= 404)
-    if  "email" in body:
-        user.email=body["email"]
-    if  "password" in body:
-        user.password=body["password"]
-    if  "is_active" in body:
-        user.is_active=body["is_active"]
-    db.session.commit()
-    return jsonify(user.serialize()), 200
-
-
-@api.route("/User/<int:id>", methods=["DELETE"])
-def delete_user(id):
-    user= User.query.get(id)
-    if user is None:
-        raise APIException('User not found', status_code= 404)
-    db.session.delete(user)
-    db.session.commit()
-    return jsonify(user.serialize()), 200
-
-
-@api.route("/private", methods=["GET"])
+@api.route('/private', methods=['GET'])
 @jwt_required()
-def get_private():
-    return jsonify({"msg":"This is a private end point, you need to be logged in to see it."}), 200
+def handle_private():
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+
+    if user is None:
+        return jsonify({"msg": "Please login"})
+    else:
+        return jsonify({"user_id": user.id, "email":user.email}), 200
